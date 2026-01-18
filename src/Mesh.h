@@ -53,7 +53,8 @@ private:
 
 // utility: loader
 void loadOFF(const std::string &filename, std::shared_ptr<Mesh> meshPtr);
-void loadOBJ(const std::string &filename, std::shared_ptr<Mesh> meshPtr);
+void loadOBJ(const std::string& filename, std::shared_ptr<Mesh> mesh);
+
 
 
 #endif  // MESH_H

@@ -14,6 +14,10 @@
 #include <string>
 #include <memory>
 
+#include <unordered_map>
+#include <cfloat>
+
+
 Mesh::~Mesh()
 {
   clear();
@@ -46,7 +50,8 @@ void Mesh::recomputePerVertexNormals(bool angleBased)
     _vertexNormals[t[2]] += n_t;
   }
   for(unsigned int nIt = 0 ; nIt < _vertexNormals.size() ; ++nIt) {
-    glm::normalize(_vertexNormals[nIt]);
+    // glm::normalize(_vertexNormals[nIt]);
+    _vertexNormals[nIt] = glm::normalize(_vertexNormals[nIt]);
   }
 }
 
@@ -255,65 +260,166 @@ void loadOFF(const std::string &filename, std::shared_ptr<Mesh> meshPtr)
   std::cout << " > Mesh <" << filename << "> loaded" <<  std::endl;
 }
 
-void loadOBJ(const std::string &filename, std::shared_ptr<Mesh> meshPtr)
+struct Vertex {
+  glm::vec3 p;
+  glm::vec3 n;
+  glm::vec2 uv;
+};
+
+static glm::vec3 safeNormalize(const glm::vec3& v) {
+  float len = glm::length(v);
+  if (len < 1e-8f) return glm::vec3(0,1,0);
+  return v / len;
+}
+
+void loadOBJ(const std::string& filename, std::shared_ptr<Mesh> mesh)
 {
-  std::cout << " > Start loading mesh <" << filename << ">" << std::endl;
-  meshPtr->clear();
-
-  tinyobj::ObjReaderConfig config;
-  config.triangulate = true;
-
   tinyobj::ObjReader reader;
-  if(!reader.ParseFromFile(filename, config)) {
-    std::string err = reader.Error();
-    if(err.empty()) err = "Failed to parse OBJ";
-    throw std::runtime_error("[Mesh Loader][loadOBJ] " + err);
+  tinyobj::ObjReaderConfig config;
+  config.triangulate = true;      // IMPORTANT
+  config.vertex_color = false;
+
+  if (!reader.ParseFromFile(filename, config)) {
+    if (!reader.Error().empty())
+      throw std::runtime_error(reader.Error());
+    throw std::runtime_error("tinyobj failed with no message");
   }
-  if(!reader.Warning().empty())
-    std::cout << " > [OBJ warning] " << reader.Warning() << std::endl;
+  if (!reader.Warning().empty()) {
+    std::cerr << "[tinyobj warn] " << reader.Warning() << std::endl;
+  }
 
-  const auto &attrib = reader.GetAttrib();
-  const auto &shapes = reader.GetShapes();
+  const auto& attrib = reader.GetAttrib();
+  const auto& shapes = reader.GetShapes();
 
-  auto &P = meshPtr->vertexPositions();
-  auto &T = meshPtr->triangleIndices();
-  P.clear();
-  T.clear();
+  std::vector<Vertex> vertices;
+  std::vector<unsigned int> indices;
+  vertices.reserve(100000);
+  indices.reserve(100000);
 
-  // Build a simple triangle soup (robust)
-  for(const auto &shape : shapes) {
+  // map unique (v/vt/vn) triplets to a single index
+  struct Key { int v, vt, vn; };
+  struct KeyHash {
+    size_t operator()(Key const& k) const noexcept {
+      size_t h1 = std::hash<int>{}(k.v);
+      size_t h2 = std::hash<int>{}(k.vt);
+      size_t h3 = std::hash<int>{}(k.vn);
+      return h1 ^ (h2 << 1) ^ (h3 << 2);
+    }
+  };
+  struct KeyEq {
+    bool operator()(Key const& a, Key const& b) const noexcept {
+      return a.v==b.v && a.vt==b.vt && a.vn==b.vn;
+    }
+  };
+  std::unordered_map<Key, unsigned int, KeyHash, KeyEq> remap;
+
+  auto getPos = [&](int vi) {
+    return glm::vec3(
+      attrib.vertices[3*vi+0],
+      attrib.vertices[3*vi+1],
+      attrib.vertices[3*vi+2]
+    );
+  };
+
+  auto getNrm = [&](int ni) {
+    return glm::vec3(
+      attrib.normals[3*ni+0],
+      attrib.normals[3*ni+1],
+      attrib.normals[3*ni+2]
+    );
+  };
+
+  auto getUV = [&](int ti) {
+    return glm::vec2(
+      attrib.texcoords[2*ti+0],
+      attrib.texcoords[2*ti+1]
+    );
+  };
+
+  for (const auto& shape : shapes) {
     size_t index_offset = 0;
-    for(size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
+    for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
       int fv = shape.mesh.num_face_vertices[f];
-      if(fv != 3) { index_offset += fv; continue; }
+      // config.triangulate=true => fv should be 3
+      for (int v = 0; v < fv; v++) {
+        const tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
 
-      glm::uvec3 tri;
-      for(int v = 0; v < 3; v++) {
-        tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
+        Key key{ idx.vertex_index, idx.texcoord_index, idx.normal_index };
+        auto it = remap.find(key);
+        if (it == remap.end()) {
+          Vertex vert{};
+          vert.p = getPos(idx.vertex_index);
 
-        glm::vec3 pos(
-          attrib.vertices[3 * idx.vertex_index + 0],
-          attrib.vertices[3 * idx.vertex_index + 1],
-          attrib.vertices[3 * idx.vertex_index + 2]
-        );
+          if (idx.normal_index >= 0 && !attrib.normals.empty())
+            vert.n = getNrm(idx.normal_index);
+          else
+            vert.n = glm::vec3(0,1,0);
 
-        P.push_back(pos);
-        tri[v] = (unsigned int)P.size() - 1;
+          if (idx.texcoord_index >= 0 && !attrib.texcoords.empty())
+            vert.uv = getUV(idx.texcoord_index);
+          else
+            vert.uv = glm::vec2(0,0);
+
+          unsigned int newIndex = (unsigned int)vertices.size();
+          vertices.push_back(vert);
+          remap[key] = newIndex;
+          indices.push_back(newIndex);
+        } else {
+          indices.push_back(it->second);
+        }
       }
-      T.push_back(tri);
-      index_offset += 3;
+      index_offset += fv;
     }
   }
 
-  if(P.empty() || T.empty())
-    throw std::runtime_error("[Mesh Loader][loadOBJ] OBJ produced empty mesh (no triangles).");
+  // If normals missing, compute per-vertex normals
+  bool normalsMissing = attrib.normals.empty();
+  if (normalsMissing) {
+    std::vector<glm::vec3> acc(vertices.size(), glm::vec3(0));
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+      unsigned int i0 = indices[i], i1 = indices[i+1], i2 = indices[i+2];
+      glm::vec3 p0 = vertices[i0].p, p1 = vertices[i1].p, p2 = vertices[i2].p;
+      glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+      acc[i0] += n; acc[i1] += n; acc[i2] += n;
+    }
+    for (size_t i = 0; i < vertices.size(); ++i)
+      vertices[i].n = safeNormalize(acc[i]);
+  }
 
-  meshPtr->vertexNormals().resize(P.size(), glm::vec3(0.f, 0.f, 1.f));
-  meshPtr->vertexTexCoords().resize(P.size(), glm::vec2(0.f, 0.f));
-  meshPtr->recomputePerVertexNormals();
-  meshPtr->recomputePerVertexTextureCoordinates();
+  mesh->clear();
 
-  std::cout << " > Mesh <" << filename << "> loaded"
-            << " (V=" << P.size() << ", T=" << T.size() << ")"
-            << std::endl;
+  auto &P  = mesh->vertexPositions();
+  auto &N  = mesh->vertexNormals();
+  auto &UV = mesh->vertexTexCoords();
+  auto &T  = mesh->triangleIndices();
+
+  P.clear(); N.clear(); UV.clear(); T.clear();
+
+  P.reserve(vertices.size());
+  N.reserve(vertices.size());
+  UV.reserve(vertices.size());
+
+  for (auto &v : vertices) {
+    P.push_back(v.p);
+    N.push_back(v.n);
+    UV.push_back(v.uv);
+  }
+
+  // indices is flat: 0,1,2, 3,4,5, ...
+  if (indices.size() % 3 != 0)
+    throw std::runtime_error("OBJ indices not multiple of 3 (triangulation failed?)");
+
+  T.resize(indices.size() / 3);
+  for (size_t i = 0; i < T.size(); ++i) {
+    T[i] = glm::uvec3(indices[3*i+0], indices[3*i+1], indices[3*i+2]);
+    
+  }
+
+  mesh->recomputePerVertexNormals();
+
+
+  // optional: if you want smoother normals always
+  // mesh->recomputePerVertexNormals();
+
 }
+

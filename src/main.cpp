@@ -74,6 +74,13 @@ bool g_appTimerStoppedP = true;
 // TODO: textures
 unsigned int g_availableTextureSlot = 0;
 
+//sky view
+GLuint g_skyTex = 0;
+GLuint g_skyVao = 0;
+std::shared_ptr<ShaderProgram> g_skyShader = nullptr;
+
+
+
 GLuint loadTextureFromFileToGPU(const std::string &filename)
 {
   int width, height, numComponents;
@@ -114,6 +121,31 @@ GLuint loadTextureFromFileToGPU(const std::string &filename)
   stbi_image_free(data);
   glBindTexture(GL_TEXTURE_2D, 0); // unbind the texture
   return texID;
+}
+
+GLuint loadHDRTexture2D(const std::string& filename) {
+  stbi_set_flip_vertically_on_load(true);
+  int w, h, n;
+  float* data = stbi_loadf(filename.c_str(), &w, &h, &n, 0);
+  if(!data) {
+    throw std::runtime_error(std::string("Failed to load HDR: ") + filename);
+  }
+
+  GLenum format = (n == 4) ? GL_RGBA : GL_RGB;
+
+  GLuint tex;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, w, h, 0, format, GL_FLOAT, data);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  stbi_image_free(data);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  return tex;
 }
 
 class FboShadowMap {
@@ -232,11 +264,12 @@ struct Light {
 
 struct Scene {
   std::vector<Light> lights;
-  std::shared_ptr<Mesh> rock = nullptr;
+  std::shared_ptr<Mesh> back_rock = nullptr;
   std::shared_ptr<Mesh> stage = nullptr;
+  std::shared_ptr<Mesh> rock = nullptr;
 
   //texture
-  GLuint rockTexture = 0;
+  GLuint back_rockTexture = 0;
 
 
   // meshes
@@ -248,6 +281,11 @@ struct Scene {
   glm::mat4 planeMat = glm::mat4(1.0);
   glm::mat4 floorMat = glm::mat4(1.0);
   glm::mat4 stageMat = glm::mat4(1.0);
+
+  glm::mat4 rockMat1 = glm::mat4(1.0);
+  glm::mat4 rockMat2 = glm::mat4(1.0);
+  glm::mat4 rockMat3 = glm::mat4(1.0);
+  
 
   glm::vec3 scene_center = glm::vec3(0);
   float scene_radius = 1.f;
@@ -288,6 +326,27 @@ struct Scene {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Erase the color and z buffers.
     glCullFace(GL_BACK);
 
+    //SKY draw
+    g_skyShader->use();
+    g_skyShader->set("invView", glm::inverse(g_cam->computeViewMatrix()));
+    g_skyShader->set("invProj", glm::inverse(g_cam->computeProjectionMatrix()));
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_skyTex);
+    g_skyShader->set("skyEquirect", 0);
+
+    glBindVertexArray(g_skyVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    g_skyShader->stop();
+
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+
+
     mainShader->use();
 
     // camera
@@ -311,12 +370,12 @@ struct Scene {
     mainShader->set("normMat", glm::mat3(glm::inverseTranspose(planeMat)));
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, rockTexture);
+    glBindTexture(GL_TEXTURE_2D, back_rockTexture);
     mainShader->set("material.useTexture", 1);
     mainShader->set("material.albedoTex", 0);
 
     glDisable(GL_CULL_FACE);
-    rock->render();
+    back_rock->render();
     glEnable(GL_CULL_FACE);
     
     mainShader->set("material.useTexture", 0);
@@ -340,7 +399,19 @@ struct Scene {
     mainShader->set("modelMat", stageMat);
     mainShader->set("normMat", glm::mat3(glm::inverseTranspose(stageMat)));
     stage->render();
-    
+
+    //rocks
+    auto drawRock = [&](const glm::mat4& M){
+      mainShader->set("material.albedo", glm::vec3(0.6f, 0.6f, 0.6f));
+      mainShader->set("modelMat", M);
+      mainShader->set("normMat", glm::mat3(glm::inverseTranspose(M)));
+      // glDisable(GL_CULL_FACE);
+      rock->render();
+      // glEnable(GL_CULL_FACE);
+    };
+    drawRock(rockMat1);
+    drawRock(rockMat2);
+    drawRock(rockMat3);
 
     mainShader->stop();
     //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -507,6 +578,15 @@ void initOpenGL()
   // Loads and compile the programmable shader pipeline
   try {
     g_scene.mainShader = ShaderProgram::genBasicShaderProgram("src/vertexShader.glsl", "src/fragmentShader.glsl");
+
+    // sky shader + texture
+    g_skyShader = ShaderProgram::genBasicShaderProgram("src/vertexShaderSky.glsl",
+                                                   "src/fragmentShaderSky.glsl");
+    g_skyTex = loadHDRTexture2D("data/farmland_overcast_4k.hdr");
+    glGenVertexArrays(1, &g_skyVao);
+
+
+
     g_scene.mainShader->stop();
 
   } catch(std::exception &e) {
@@ -540,13 +620,13 @@ void initScene(const std::string &meshFilename)
     g_scene.rhino->init();
 
     // rock back-wall
-    g_scene.rock = std::make_shared<Mesh>();
+    g_scene.back_rock = std::make_shared<Mesh>();
     try {
-      loadOBJ("data/rock_back.obj", g_scene.rock);
+      loadOBJ("data/rock_back.obj", g_scene.back_rock);
     } catch(std::exception &e) {
-      exitOnCriticalError(std::string("[Error loading rock mesh]") + e.what());
+      exitOnCriticalError(std::string("[Error loading back_rock mesh]") + e.what());
     }
-    g_scene.rock->init();
+    g_scene.back_rock->init();
 
     // stage
     g_scene.stage = std::make_shared<Mesh>();
@@ -557,14 +637,23 @@ void initScene(const std::string &meshFilename)
     }
     g_scene.stage->init();
 
+    //rocks
+    g_scene.rock = std::make_shared<Mesh>();
+    try{
+      loadOBJ("data/rock.obj", g_scene.rock);
+    }catch(std::exception &e){
+      exitOnCriticalError(std::string("[Error loading rock mesh]") + e.what());
+    }
+    g_scene.rock->init();
+
     // floor plane (keep the square)
     g_scene.plane = std::make_shared<Mesh>();
     g_scene.plane->addPlan();
     g_scene.plane->init();
 
     
-    glm::vec3 Stage_Position(-0.185f, -0.17f, -2.3f);
-    glm::vec3 Full_Object_Scale(0.115f);
+    glm::vec3 Stage_Position(-0.185f, -0.177f, -3.0f);
+    glm::vec3 Full_Object_Scale(0.129f);
     // glm::vec3 Wall_Position(0.0f, 0.15f, -1.0f);
     glm::vec3 Wall_Position = Stage_Position + glm::vec3(0.0f, 0.05f, 0.0f);
 
@@ -579,14 +668,22 @@ void initScene(const std::string &meshFilename)
         glm::translate(glm::mat4(1.0f), glm::vec3(0, -10.25f, 0)) *
         glm::rotate(glm::mat4(1.0f), (float)(-0.5f * M_PI), glm::vec3(1.0f, 0.0f, 0.0f));
 
+
+    glm::mat4 stageTranslate = glm::translate(glm::mat4(1.0f), Stage_Position);
     g_scene.stageMat = 
-        glm::translate(glm::mat4(1.0f), Stage_Position) *
+        stageTranslate *
         glm::scale(glm::mat4(1.0f), Full_Object_Scale);
+
+    glm::mat4 rockScale = glm::scale(glm::mat4(1.0f), glm::vec3(0.2f));
+    g_scene.rockMat1 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-0.2f, -0.7f, 1.8f)) * rockScale;
+    g_scene.rockMat2 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.7f, 2.3f)) * rockScale;
+    g_scene.rockMat3 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-0.2f, -10.7f, 1.5f)) * rockScale;
+
   }
 
   // TODO: Load and setup textures
-  GLuint rockTex = loadTextureFromFileToGPU("data/rock_back_texture.png");
-  g_scene.rockTexture = rockTex;
+  GLuint back_rockTex = loadTextureFromFileToGPU("data/rock_back_texture.png");
+  g_scene.back_rockTexture = back_rockTex;
 
 
 
