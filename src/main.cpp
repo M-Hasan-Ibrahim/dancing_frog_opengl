@@ -47,7 +47,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-const std::string DEFAULT_MESH_FILENAME("data/rhino2.off");
+const std::string DEFAULT_MESH_FILENAME("data/frog.obj");
 
 // window parameters
 GLFWwindow *g_window = nullptr;
@@ -267,6 +267,7 @@ struct Scene {
   std::shared_ptr<Mesh> back_rock = nullptr;
   std::shared_ptr<Mesh> stage = nullptr;
   std::shared_ptr<Mesh> rock = nullptr;
+  std::shared_ptr<Mesh> frog = nullptr;
 
   //texture
   GLuint back_rockTexture = 0;
@@ -278,6 +279,7 @@ struct Scene {
   // transformation matrices
   glm::mat4 backRockMat = glm::mat4(1.0);
   glm::mat4 stageMat = glm::mat4(1.0);
+  glm::mat4 frogMat = glm::mat4(1.0);
 
   glm::mat4 rockMat1 = glm::mat4(1.0);
   glm::mat4 rockMat2 = glm::mat4(1.0);
@@ -409,6 +411,14 @@ struct Scene {
     drawRock(rockMat1);
     drawRock(rockMat2);
     drawRock(rockMat3);
+
+    // frog
+    mainShader->set("material.albedo", glm::vec3(0.6f, 0.6f, 0.6f));
+    mainShader->set("modelMat", frogMat);
+    mainShader->set("normMat", glm::mat3(glm::inverseTranspose(frogMat)));
+
+    frog->render();
+    // std::cout << "frog rendered" << std::endl;
 
     mainShader->stop();
     //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -636,28 +646,45 @@ void initScene(const std::string &meshFilename)
     }
     g_scene.rock->init();
 
-    
-    glm::vec3 Stage_Position(-0.05f, -0.15f, -3.5f);
-    glm::vec3 Full_Object_Scale(0.129f);
-    // glm::vec3 Wall_Position(0.0f, 0.15f, -1.0f);
-    glm::vec3 Wall_Position = Stage_Position + glm::vec3(0.0f, 0.05f, 0.0f);
+    //frog
+    g_scene.frog = std::make_shared<Mesh>();
+    try{
+      loadOBJ("data/frog1.obj", g_scene.frog);
+    }catch(std::exception &e){
+      exitOnCriticalError(std::string("[Error loading frog mesh]") + e.what());
+    }
+    g_scene.frog->init();
 
+    
+    glm::vec3 Stage_Position(-0.05f, -0.55f, -5.5f);
+    glm::vec3 Full_Object_Scale(0.129f);
+
+    glm::mat4 stageTranslate = glm::translate(glm::mat4(1.0f), Stage_Position);
+    glm::mat4 stageRotate = glm::rotate(glm::mat4(1.0f), glm::radians(-35.0f), glm::vec3(0,1,0));
+    glm::mat4 stageScale = glm::scale(glm::mat4(1.0f), Full_Object_Scale);
+
+    g_scene.stageMat = 
+        stageTranslate *
+        stageRotate *
+        stageScale;
+
+    glm::vec3 Wall_Position = Stage_Position + glm::vec3(0.0f, 0.05f, 0.0f);
+    glm::mat4 wallTranslate = glm::translate(glm::mat4(1.0f), Wall_Position);
 
     // make rock smaller (example: 0.2x)
     g_scene.backRockMat =
-        glm::translate(glm::mat4(1.0f), Wall_Position) *
-        glm::scale(glm::mat4(1.0f), Full_Object_Scale);
-
-
-    glm::mat4 stageTranslate = glm::translate(glm::mat4(1.0f), Stage_Position);
-    g_scene.stageMat = 
-        stageTranslate *
-        glm::scale(glm::mat4(1.0f), Full_Object_Scale);
+        wallTranslate *
+        stageRotate *
+        stageScale;
 
     glm::mat4 rockScale = glm::scale(glm::mat4(1.0f), glm::vec3(0.2f));
     g_scene.rockMat1 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-0.2f, -0.7f, 1.8f)) * rockScale;
-    g_scene.rockMat2 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.7f, 2.3f)) * rockScale;
+    g_scene.rockMat2 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.7f, 2.0f)) * rockScale;
     g_scene.rockMat3 = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-0.2f, -10.7f, 1.5f)) * rockScale;
+
+    glm::mat4 frogRotate = glm::rotate(glm::mat4(1.0f), glm::radians(-125.0f), glm::vec3(0,1,0));
+
+    g_scene.frogMat = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.46f, 1.95f)) * frogRotate * glm::scale(glm::mat4(1.0f), glm::vec3(0.015f));
   }
 
   // TODO: Load and setup textures
