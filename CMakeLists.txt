@@ -4,10 +4,10 @@ SET(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 SET(CMAKE_CXX_STANDARD 11)
 SET(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-project(tpShadow)
+project(projectEx)
 
 add_executable(
-  tpShadow
+  projectEx
   src/main.cpp
   src/Error.cpp
   src/Mesh.cpp
@@ -37,6 +37,6 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS})
 
 
-add_custom_command(TARGET tpShadow
+add_custom_command(TARGET projectEx
   POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tpShadow> ${CMAKE_CURRENT_SOURCE_DIR})
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:projectEx> ${CMAKE_CURRENT_SOURCE_DIR})
