@@ -2,6 +2,9 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "EnvMap.h"
+
+
 
 struct RTMaterial {
   glm::vec3 albedo = glm::vec3(0.8f);
@@ -32,6 +35,8 @@ struct RTLight {
   float intensity = 1.f;
 };
 
+class EnvMap;
+
 class RayTracer {
 public:
   RayTracer(int w, int h) : _w(w), _h(h) {}
@@ -42,8 +47,12 @@ public:
 
   void buildBVH(const RTScene& scene);
 
+  void setEnvMap(const EnvMap* env) { _env = env; }
+
 private:
   int _w = 0, _h = 0;
+
+  const EnvMap* _env = nullptr;
 
   struct Hit {
     float t = 1e30f;
@@ -56,9 +65,9 @@ private:
 
   bool intersectScene(const RTScene& scene, const glm::vec3& ro, const glm::vec3& rd, Hit& hit, float tMaxLimit) const;
 
-  bool isOccluded(const RTScene& scene, const glm::vec3& p, const glm::vec3& n, const glm::vec3& lightPos) const;
+  glm::vec3 background(const glm::vec3& rd) const;
 
-  static glm::vec3 background(const glm::vec3& rd);
+  bool isOccluded(const RTScene& scene, const glm::vec3& p, const glm::vec3& n, const glm::vec3& lightPos) const;
 
   struct AABB {
     glm::vec3 bmin = glm::vec3( 1e30f);

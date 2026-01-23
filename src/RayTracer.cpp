@@ -1,4 +1,5 @@
 #include "RayTracer.h"
+
 #include <fstream>
 #include <iostream>
 #include <algorithm>
@@ -7,12 +8,7 @@
 
 static inline float clamp01(float x) { return std::max(0.f, std::min(1.f, x)); }
 
-glm::vec3 RayTracer::background(const glm::vec3& rd) {
-  float t = 0.5f * (rd.y + 1.f);
-  glm::vec3 top(0.6f, 0.75f, 1.0f);
-  glm::vec3 bot(0.08f, 0.10f, 0.15f);
-  return (1.f - t) * bot + t * top;
-}
+
 
 bool RayTracer::intersectTriangle(const glm::vec3& ro, const glm::vec3& rd,
                                   const RTTriangle& tri, float& t, float& u, float& v)
@@ -380,4 +376,11 @@ bool RayTracer::intersectBVH(const RTScene& scene, const glm::vec3& ro, const gl
   }
 
   return any;
+}
+
+glm::vec3 RayTracer::background(const glm::vec3& rd) const {
+  if(_env) return _env->sample(rd);
+
+  float t = 0.5f * (rd.y + 1.f);
+  return (1.f - t)*glm::vec3(0.08f,0.10f,0.15f) + t*glm::vec3(0.6f,0.75f,1.0f);
 }

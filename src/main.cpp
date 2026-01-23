@@ -45,6 +45,7 @@
 #include "Mesh.h"
 
 #include "RayTracer.h"
+#include "EnvMap.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -886,11 +887,14 @@ int main(int argc, char **argv)
       L.position  = cam.pos + (-1.5f)*right + (1.1f)*up + (3.0f)*forward;
       L.color     = glm::vec3(1.f);
       L.intensity = 20.0f;
+      
+      
+      EnvMap env;
+      env.loadHDR("data/farmland_overcast_4k.hdr");
 
-      
+
       RayTracer tracer(W, H);
-      
-      std::cout << "[RT] tris=" << rt.tris.size() << std::endl;
+      tracer.setEnvMap(&env);
       tracer.buildBVH(rt);
 
       auto pixels = tracer.render(rt, cam, L);

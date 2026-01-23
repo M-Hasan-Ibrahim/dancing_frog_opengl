@@ -2,7 +2,6 @@
 #include <cmath>
 #include <algorithm>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 static inline float clamp01(float x){ return std::max(0.f, std::min(1.f, x)); }
@@ -10,7 +9,9 @@ static inline float wrap01(float x){ return x - std::floor(x); }
 
 bool EnvMap::loadHDR(const std::string& filename) {
   int c=0;
+
   float* img = stbi_loadf(filename.c_str(), &_w, &_h, &c, 3);
+  
   if(!img) return false;
   _rgb.assign(img, img + (_w*_h*3));
   stbi_image_free(img);
@@ -33,7 +34,7 @@ glm::vec3 EnvMap::sample(const glm::vec3& dir) const {
   float v = std::acos(std::max(-1.f, std::min(1.f, d.y))) / (float)M_PI;
 
   u = wrap01(u);
-  v = clamp01(v);
+  v = clamp01(1.0f - v);
 
   float fx = u * (_w - 1);
   float fy = v * (_h - 1);
