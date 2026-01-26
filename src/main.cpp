@@ -48,6 +48,8 @@
 #include "EnvMap.h"
 #include "Texture2D.h"
 
+#include <glm/gtx/quaternion.hpp>
+
 #include "stb_image.h"
 
 const std::string DEFAULT_MESH_FILENAME("data/frog1.obj");
@@ -104,6 +106,8 @@ static glm::vec3 g_frogFromPos(0), g_frogToPos(0), g_frogCtrlPos(0);
 
 static float g_frogScaleHome   = 1.0f;
 static float g_frogScaleSelect = 0.05f;
+
+static float g_frogSpinTurns = 0.9f;   // 1.0 = 360°, 0.5 = 180°, 2.0 = 720°
 
 static inline float clamp01f(float x) { return std::max(0.f, std::min(1.f, x)); }
 static inline float smoothstep01(float t) { t = clamp01f(t); return t*t*(3.f - 2.f*t); }
@@ -950,43 +954,48 @@ void update(float currentTime)
   if(g_frogAnimActive) {
     g_frogAnimTime += dt;
     float t = g_frogAnimTime / g_frogAnimDur;
-    float s = smoothstep01(t);
+    float u = smoothstep01(t);
 
-    glm::vec3 pos = bezier2(g_frogFromPos, g_frogCtrlPos, g_frogToPos, s);
+    glm::vec3 pos = bezier2(g_frogFromPos, g_frogCtrlPos, g_frogToPos, u);
 
-    // scale anim (0..1)
+    // scale
     float s0 = g_frogScaleHome;
     float s1 = g_frogScaleSelect;
-    s = g_frogTargetSel ? glm::mix(s0, s1, s) : glm::mix(s1, s0, s); // if going back, reverse
+    float sc = g_frogTargetSel ? glm::mix(s0, s1, u) : glm::mix(s1, s0, u);
 
-    // rotation part: keep base rotation (no extra rotation yet)
-    glm::mat4 RShome = g_frogBaseMat;
-    RShome[3] = glm::vec4(0,0,0,1); // remove translation
+    // spin (use u, NOT sc)
+    float angle = (g_frogTargetSel)
+      ? (-glm::two_pi<float>() * g_frogSpinTurns * u)
+      : (-glm::two_pi<float>() * g_frogSpinTurns * (1.0f - u));
 
-    // remove home scale from RS, then apply animated scale cleanly
+    glm::quat qSpin = glm::angleAxis(angle, glm::vec3(0,1,0));
+
+    // base rotation: remove translation + remove base scale
+    glm::mat4 RS = g_frogBaseMat;
+    RS[3] = glm::vec4(0,0,0,1);
+
     float invHome = (g_frogScaleHome > 1e-8f) ? (1.0f / g_frogScaleHome) : 1.0f;
-    glm::mat4 Ronly = glm::scale(glm::mat4(1.0f), glm::vec3(invHome)) * RShome;
+    glm::mat4 Ronly = glm::scale(glm::mat4(1.0f), glm::vec3(invHome)) * RS;
 
+    glm::quat qBase = glm::quat_cast(glm::mat3(Ronly));
+    glm::quat q = qSpin * qBase;
+
+    // TRS
     g_scene.frogMat =
       glm::translate(glm::mat4(1.0f), pos) *
-      Ronly *
-      glm::scale(glm::mat4(1.0f), glm::vec3(s));
-
-
+      glm::mat4_cast(q) *
+      glm::scale(glm::mat4(1.0f), glm::vec3(sc));
 
     if(t >= 1.0f) {
       g_frogAnimActive = false;
       g_frogSelected = g_frogTargetSel;
 
-      // snap exactly to target
-      g_scene.frogMat = setTranslationKeepRS(g_scene.frogMat, g_frogToPos);
-
-      // if returned home, restore the exact original matrix
       if(!g_frogSelected) {
         g_scene.frogMat = g_frogBaseMat;
       }
     }
   }
+
 
   // keep TP timer behavior unchanged
   if(!g_appTimerStoppedP) {
