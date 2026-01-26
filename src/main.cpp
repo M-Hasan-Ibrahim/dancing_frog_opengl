@@ -92,6 +92,38 @@ static GLuint g_rtVao = 0;
 
 
 
+// ---------------- Frog "character select" motion (P toggles) ----------------
+static bool  g_frogAnimActive = false;
+static bool  g_frogSelected   = false;   // current state
+static bool  g_frogTargetSel  = false;   // state after current animation
+static float g_frogAnimTime   = 0.0f;
+static float g_frogAnimDur    = 0.9f;    // seconds (tweak)
+
+static glm::mat4 g_frogBaseMat = glm::mat4(1.0f); // original frog matrix (saved after init)
+static glm::vec3 g_frogFromPos(0), g_frogToPos(0), g_frogCtrlPos(0);
+
+static float g_frogScaleHome   = 1.0f;
+static float g_frogScaleSelect = 0.05f;
+
+static inline float clamp01f(float x) { return std::max(0.f, std::min(1.f, x)); }
+static inline float smoothstep01(float t) { t = clamp01f(t); return t*t*(3.f - 2.f*t); }
+
+// Quadratic Bezier: (1-t)^2 p0 + 2(1-t)t p1 + t^2 p2
+static inline glm::vec3 bezier2(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, float t) {
+  float a = 1.f - t;
+  return a*a*p0 + 2.f*a*t*p1 + t*t*p2;
+}
+
+// Replace translation of a TRS matrix while keeping rotation+scale
+static inline glm::mat4 setTranslationKeepRS(const glm::mat4& M, const glm::vec3& pos) {
+  glm::mat4 RS = M;
+  RS[3] = glm::vec4(0,0,0,1);          // remove translation
+  return glm::translate(glm::mat4(1), pos) * RS;
+}
+
+
+
+
 
 GLuint loadTextureFromFileToGPU(const std::string &filename)
 {
@@ -457,6 +489,7 @@ void printHelp()
     "    * F1: toggle wireframe/surface rendering" << std::endl <<
     "    * R: ray trace once (writes raytrace.ppm)" << std::endl <<
     "    * K: toggle ray tracing" << std::endl <<
+    "    * P: toggle frog animation" << std::endl <<
     "    * ESC: quit the program" << std::endl;
 }
 
@@ -468,6 +501,50 @@ void windowSizeCallback(GLFWwindow *window, int width, int height)
   g_cam->setAspectRatio(static_cast<float>(width)/static_cast<float>(height));
   glViewport(0, 0, (GLint)width, (GLint)height); // Dimension of the rendering region in the window
 }
+
+void selectFrog(){
+  if(!g_frogAnimActive) {
+    g_frogAnimActive = true;
+    g_frogAnimTime   = 0.0f;
+
+    glm::vec3 curPos = glm::vec3(g_scene.frogMat[3]);
+    g_frogFromPos = curPos;
+
+    // camera basis in world space
+    glm::mat4 invV = glm::inverse(g_cam->computeViewMatrix());
+    glm::vec3 right   = glm::normalize(glm::vec3(invV[0]));
+    glm::vec3 up      = glm::normalize(glm::vec3(invV[1]));
+    glm::vec3 forward = glm::normalize(-glm::vec3(invV[2]));
+
+    bool goingToCenter = !g_frogSelected;
+    g_frogTargetSel = goingToCenter;
+
+    if(goingToCenter) {
+      // Put frog on the camera forward axis at same depth => centered on screen
+      glm::vec3 camPos = g_cam->getPosition();
+      float dist = glm::dot((curPos - camPos), forward);
+
+
+
+      // move to camera center line, then push closer/farther and offset in camera axes
+      float frogForwardExtra = 0.0f;
+      glm::vec3 frogCenterOffset = glm::vec3(0.0f, -1.2f, -2.5f);
+      glm::vec3 centerPos = camPos + forward * (dist - frogForwardExtra)
+                                + right   * frogCenterOffset.x
+                                + up      * frogCenterOffset.y
+                                + forward * frogCenterOffset.z;
+
+      g_frogToPos = centerPos;
+
+      // curved path (tweak these 2 numbers if you want more/less curve)
+      g_frogCtrlPos = 0.5f*(g_frogFromPos + g_frogToPos) + 0.35f*up + 0.25f*right;
+    } else {
+      g_frogToPos = glm::vec3(g_frogBaseMat[3]);
+      g_frogCtrlPos = 0.5f*(g_frogFromPos + g_frogToPos) + 0.35f*up - 0.25f*right;
+    }
+  }
+}
+
 
 // Executed each time a key is entered.
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -488,9 +565,10 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
     glfwSetWindowShouldClose(window, true); // Closes the application if the escape key is pressed
   } else if(action == GLFW_PRESS && key == GLFW_KEY_R) {
     g_doRayTrace = true;
-
   } else if (key == GLFW_KEY_K && action == GLFW_PRESS) {
     g_showRayTrace = false;
+  } else if(action == GLFW_PRESS && key == GLFW_KEY_P) {
+    selectFrog();
   }
 }
 
@@ -706,6 +784,8 @@ void initScene(const std::string &meshFilename)
     glm::mat4 frogRotate = glm::rotate(glm::mat4(1.0f), glm::radians(-125.0f), glm::vec3(0,1,0));
 
     g_scene.frogMat = stageTranslate * glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.46f, 1.95f)) * frogRotate * glm::scale(glm::mat4(1.0f), glm::vec3(0.015f));
+    g_frogBaseMat = g_scene.frogMat;
+    g_frogScaleHome = glm::length(glm::vec3(g_frogBaseMat[0]));
   }
 
   GLuint back_rockTex = loadTextureFromFileToGPU("data/rock_back_texture.png");
@@ -713,9 +793,6 @@ void initScene(const std::string &meshFilename)
 
   GLuint stageTex = loadTextureFromFileToGPU("data/wood_table_diff_2k.jpg");
   g_scene.stageTexture = stageTex;
-
-
-
 
   // // Setup lights
   // const glm::vec3 pos[3] = {
@@ -747,9 +824,9 @@ void initScene(const std::string &meshFilename)
   g_scene.lights.push_back(Light());
   Light &L = g_scene.lights[0];
 
-  L.position  = glm::vec3(-2.0f, 2.1f, -3.5f);
-  L.color     = glm::vec3(1.0f, 1.0f, 1.0f);
-  L.intensity = 1.0f;
+  L.position  = glm::vec3(0.0f, 1.0f, 0.5f);
+  L.color     = glm::vec3(0.6f, 0.6f, 0.6f);
+  L.intensity = 3.0f;
 
 
   // Adjust the camera to the mesh
@@ -852,16 +929,73 @@ void render()
 }
 
 // Update any accessible variable based on the current time
+// void update(float currentTime)
+// {
+//   if(!g_appTimerStoppedP) {
+//     // Animate any entity of the program here
+//     float dt = currentTime - g_appTimerLastColckTime;
+//     g_appTimerLastColckTime = currentTime;
+//     g_appTimer += dt;
+//     // <---- Update here what needs to be animated over time ---->
+//   }
+// }
+
 void update(float currentTime)
 {
+  static float lastTime = currentTime;
+  float dt = currentTime - lastTime;
+  lastTime = currentTime;
+
+  // frog animation runs regardless of the TP timer
+  if(g_frogAnimActive) {
+    g_frogAnimTime += dt;
+    float t = g_frogAnimTime / g_frogAnimDur;
+    float s = smoothstep01(t);
+
+    glm::vec3 pos = bezier2(g_frogFromPos, g_frogCtrlPos, g_frogToPos, s);
+
+    // scale anim (0..1)
+    float s0 = g_frogScaleHome;
+    float s1 = g_frogScaleSelect;
+    s = g_frogTargetSel ? glm::mix(s0, s1, s) : glm::mix(s1, s0, s); // if going back, reverse
+
+    // rotation part: keep base rotation (no extra rotation yet)
+    glm::mat4 RShome = g_frogBaseMat;
+    RShome[3] = glm::vec4(0,0,0,1); // remove translation
+
+    // remove home scale from RS, then apply animated scale cleanly
+    float invHome = (g_frogScaleHome > 1e-8f) ? (1.0f / g_frogScaleHome) : 1.0f;
+    glm::mat4 Ronly = glm::scale(glm::mat4(1.0f), glm::vec3(invHome)) * RShome;
+
+    g_scene.frogMat =
+      glm::translate(glm::mat4(1.0f), pos) *
+      Ronly *
+      glm::scale(glm::mat4(1.0f), glm::vec3(s));
+
+
+
+    if(t >= 1.0f) {
+      g_frogAnimActive = false;
+      g_frogSelected = g_frogTargetSel;
+
+      // snap exactly to target
+      g_scene.frogMat = setTranslationKeepRS(g_scene.frogMat, g_frogToPos);
+
+      // if returned home, restore the exact original matrix
+      if(!g_frogSelected) {
+        g_scene.frogMat = g_frogBaseMat;
+      }
+    }
+  }
+
+  // keep TP timer behavior unchanged
   if(!g_appTimerStoppedP) {
-    // Animate any entity of the program here
-    float dt = currentTime - g_appTimerLastColckTime;
+    float dt2 = currentTime - g_appTimerLastColckTime;
     g_appTimerLastColckTime = currentTime;
-    g_appTimer += dt;
-    // <---- Update here what needs to be animated over time ---->
+    g_appTimer += dt2;
   }
 }
+
 
 void usage(const char *command)
 {
@@ -923,7 +1057,8 @@ int main(int argc, char **argv)
       // Frog
       int matFrog = (int)rt.mats.size();
       rt.mats.push_back(RTMaterial());
-      rt.mats.back().albedo = glm::vec3(0.35f, 0.75f, 0.35f);
+      rt.mats.back().albedo = glm::vec3(0.35f, 0.95f, 0.35f);
+      // rt.mats.back().albedo = glm::vec3(0.0f, 0.86f, 0.61f);
       rt.mats.back().shadowCatcher = false;
       rt.mats.back().useTexture = false;
       rt.mats.back().texId = -1;
@@ -954,9 +1089,9 @@ int main(int argc, char **argv)
       glm::vec3 forward = -glm::vec3(invV[2]);
 
       RTLight L;
-      L.position  = cam.pos + (-1.5f)*right + (2.1f)*up + (3.0f)*forward;
+      L.position  = cam.pos + (-1.5f)*right + (3.0f)*up + (3.0f)*forward;
       L.color     = glm::vec3(1.f);
-      L.intensity = 20.0f;
+      L.intensity = 15.0f;
       
       
       EnvMap env;

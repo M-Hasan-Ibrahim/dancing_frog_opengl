@@ -78,40 +78,6 @@ std::vector<glm::vec3> RayTracer::render(const RTScene& scene, const RTCamera& c
       glm::vec3 rd = glm::normalize(glm::vec3(cam.invView * glm::vec4(dirCam, 0.f)));
       glm::vec3 ro = cam.pos;
 
-      // Hit hit;
-      // glm::vec3 col = background(rd);
-
-      // if (intersectScene(scene, ro, rd, hit, 1e30f)) {
-      //   const RTMaterial& mat = scene.mats[std::max(0, hit.matId)];
-
-      //   glm::vec3 Lvec = light.position - hit.p;
-      //   float dist2 = glm::dot(Lvec, Lvec);
-      //   float dist  = std::sqrt(dist2);
-      //   glm::vec3 wi = Lvec / std::max(dist, 1e-6f);
-
-      //   float ndotl = std::max(0.f, glm::dot(hit.n, wi));
-
-      //   float atten = 1.0f / std::max(dist2, 1e-4f);
-
-      //   glm::vec3 Li = light.color * (light.intensity * atten);
-
-      //   float vis = isOccluded(scene, hit.p, hit.n, light.position) ? 0.f : 1.f;
-
-      //   glm::vec3 albedo = mat.albedo;
-      //   if (mat.useTexture && mat.texId >= 0) {
-      //       albedo *= scene.textures[mat.texId].sample(hit.uv);
-      //   }
-      //   // small ambient to avoid pure black (temporary; later replaced by env lighting)
-      //   glm::vec3 ambient = 0.03f * albedo;
-
-      //   col = ambient + albedo * Li * ndotl * vis;
-
-      // }
-
-      // img[y * _w + x] = col;
-
-    // }
-
       int pix = y * _w + x;
 
       glm::vec3 col = background(rd);
@@ -158,9 +124,6 @@ std::vector<glm::vec3> RayTracer::render(const RTScene& scene, const RTCamera& c
 
         img[pix] = bg * factor;
         continue;
-        // float vis = isOccluded(scene, hit.p, hit.n, light.position) ? 0.0f : 1.0f;
-        // img[pix] = glm::vec3(vis); // white=lit, black=shadow
-        // continue;
       }
 
       {
@@ -193,34 +156,34 @@ std::vector<glm::vec3> RayTracer::render(const RTScene& scene, const RTCamera& c
   return img;
 }
 
-void RayTracer::savePPM(const std::string& filename, const std::vector<glm::vec3>& pixels, int w, int h) {
-  std::ofstream out(filename, std::ios::binary);
-  out << "P6\n" << w << " " << h << "\n255\n";
+// void RayTracer::savePPM(const std::string& filename, const std::vector<glm::vec3>& pixels, int w, int h) {
+//   std::ofstream out(filename, std::ios::binary);
+//   out << "P6\n" << w << " " << h << "\n255\n";
 
-  for (int i = 0; i < w * h; ++i) {
+//   for (int i = 0; i < w * h; ++i) {
     
-        glm::vec3 c = pixels[i];
+//         glm::vec3 c = pixels[i];
 
-        float exposure = 1.0f;
-        c *= exposure;
+//         float exposure = 1.0f;
+//         c *= exposure;
 
-        c = c / (glm::vec3(1.0f) + c);
+//         c = c / (glm::vec3(1.0f) + c);
         
-        c = glm::vec3(std::pow(std::max(c.x, 0.0f), 1.f/2.2f),
-                    std::pow(std::max(c.y, 0.0f), 1.f/2.2f),
-                    std::pow(std::max(c.z, 0.0f), 1.f/2.2f));
+//         c = glm::vec3(std::pow(std::max(c.x, 0.0f), 1.f/2.2f),
+//                     std::pow(std::max(c.y, 0.0f), 1.f/2.2f),
+//                     std::pow(std::max(c.z, 0.0f), 1.f/2.2f));
 
-        c = glm::clamp(c, glm::vec3(0.0f), glm::vec3(1.0f));
+//         c = glm::clamp(c, glm::vec3(0.0f), glm::vec3(1.0f));
 
 
-        unsigned char r = (unsigned char)(255.f * c.x);
-        unsigned char g = (unsigned char)(255.f * c.y);
-        unsigned char b = (unsigned char)(255.f * c.z);
-        out.write((char*)&r, 1);
-        out.write((char*)&g, 1);
-        out.write((char*)&b, 1);
-  }
-}
+//         unsigned char r = (unsigned char)(255.f * c.x);
+//         unsigned char g = (unsigned char)(255.f * c.y);
+//         unsigned char b = (unsigned char)(255.f * c.z);
+//         out.write((char*)&r, 1);
+//         out.write((char*)&g, 1);
+//         out.write((char*)&b, 1);
+//   }
+// }
 
 RayTracer::AABB RayTracer::triAABB(const RTTriangle& t) {
   AABB b;
